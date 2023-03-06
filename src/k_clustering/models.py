@@ -6,210 +6,67 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import pickle
+import wandb
 import networkx as nx
 
 from torch_geometric.nn import MessagePassing, GCNConv, DenseGCNConv, GINConv, GraphConv
 from torch_geometric.utils import add_self_loops, degree, to_dense_adj, convert, to_undirected
 from torch_geometric.nn import global_mean_pool, GlobalAttention, global_max_pool
 
-from torchmetrics.classification import BinaryAccuracy, MulticlassAccuracy, MulticlassConfusionMatrix
+#from torchmetrics.classification import BinaryAccuracy, MulticlassAccuracy, MulticlassConfusionMatrix
 
-class BA_Shapes_GCN(nn.Module):
-    def __init__(self, num_in_features, num_hidden_features, num_classes, name):
-        super(BA_Shapes_GCN, self).__init__()
+class Model_random_proto(nn.Module):
+    def __init__(self, num_in_features, num_hidden_features, num_classes,
+                 num_layers, prot_index, train_mask, name):
+        super(Model_random_proto, self).__init__()
 
         self.name = name
+        self.prot = prot_index
+        self.num_layers = num_layers
+        self.train_mask = train_mask
 
-        self.conv0 = GCNConv(num_in_features, num_hidden_features)
-        self.conv1 = GCNConv(num_hidden_features, num_hidden_features)
-        self.conv2 = GCNConv(num_hidden_features, num_hidden_features)
-        self.conv3 = GCNConv(num_hidden_features, num_hidden_features)
+        self.layers = [GCNConv(num_in_features, num_hidden_features)]
+        self.layers += [GCNConv(num_hidden_features, num_hidden_features) for _ in
+                        range(num_layers - 1)]
+        self.layers = nn.ModuleList(self.layers)
 
         # linear layers
-        self.linear = nn.Linear(num_hidden_features, num_classes)
+        self.linear = nn.Sequential(nn.Linear(num_hidden_features, num_hidden_features),
+                                    nn.ReLU(),
+                                    nn.Linear(num_hidden_features, num_classes))
+
+
+    def relative_rep(self, x, anchor_indexes):
+        anchors = x[anchor_indexes]
+        result = torch.Tensor()
+        cos = nn.CosineSimilarity(dim=1, eps=1e-6)
+        for t in anchors:
+            tmp = (cos(x, t).unsqueeze(dim=-1) - (-1)) / (1 - (-1))
+            result = torch.cat((result, tmp), dim=-1)
+        # result = F.softmax(result, dim=-1)
+        return result
+
+    def y_composition(self, x, out_proto):
+        y = F.log_softmax(torch.mm(x, out_proto), dim=-1)
+
+        return y
 
     def forward(self, x, edge_index):
-        x = self.conv0(x, edge_index)
-        x = F.relu(x)
+        for i in range(self.num_layers):
+            x = self.layers[i](x, edge_index)
+            if i != self.num_layers - 1:
+                x = F.relu(x)
 
-        x = self.conv1(x, edge_index)
-        x = F.relu(x)
+        qn = torch.norm(x, p=2, dim=1, keepdim=True)
+        x = x.div(qn.expand_as(x))
 
-        x = self.conv2(x, edge_index)
-        x = F.relu(x)
+        x_rel = self.relative_rep(x, self.prot)
 
-        x = self.conv3(x, edge_index)
-        x = F.relu(x)
+        out_proto = F.log_softmax(self.linear(x[self.prot]), dim=-1)
 
-        x = self.linear(x)
+        out = self.y_composition(x_rel, out_proto)
 
-        return F.log_softmax(x, dim=-1)
-
-class BA_Shapes_GCN_edge(nn.Module):
-    def __init__(self, num_in_features, num_hidden_features, num_classes, name):
-        super(BA_Shapes_GCN_edge, self).__init__()
-
-        self.name = name
-
-        self.conv0 = GCNConv(num_in_features, num_hidden_features)
-        self.conv1 = GCNConv(num_hidden_features, num_hidden_features)
-        self.conv2 = GCNConv(num_hidden_features, num_hidden_features)
-        self.conv3 = GCNConv(num_hidden_features, num_hidden_features)
-
-        self.linear1 = nn.Linear(num_hidden_features * 2, num_hidden_features)
-        # self.linear12 = nn.Linear(num_hidden_features * 2, num_hidden_features)
-        self.linear2 = nn.Linear(num_hidden_features, num_classes)
-
-    def forward(self, x, edge_index, pos_edges_train, neg_edges_train, pos_edges_test, neg_edges_test):
-        x = self.conv0(x, edge_index)
-        x = F.relu(x)
-
-        x = self.conv1(x, edge_index)
-        x = F.relu(x)
-
-        x = self.conv2(x, edge_index)
-        x = F.relu(x)
-
-        x = self.conv3(x, edge_index)
-        # x = F.relu(x)
-
-        x1 = torch.cat([x[pos_edges_train[0]], x[pos_edges_train[1]]], 1)
-        x2 = torch.cat([x[neg_edges_train[0]], x[neg_edges_train[1]]], 1)
-        x3 = torch.cat([x[pos_edges_test[0]], x[pos_edges_test[1]]], 1) #
-        x4 = torch.cat([x[neg_edges_test[0]], x[neg_edges_test[1]]], 1) #
-        x_train = torch.cat([x1, x2], 0)
-        n_train = x_train.shape[0]
-        x_test = torch.cat([x3, x4], 0) #
-        n_test = x_test.shape[0]
-        x = torch.cat([x_train, x_test], 0)
-        x = self.linear1(x)
-        x = F.relu(x)
-        x = self.linear2(x)
-
-        x = x.squeeze(1)
-        return x[:n_train], x[n_train:]
-
-
-class BA_Shapes_GCN_edge_classification(nn.Module):
-    def __init__(self, num_in_features, num_hidden_features, num_classes, name):
-        super(BA_Shapes_GCN_edge_classification, self).__init__()
-
-        self.name = name
-
-        self.conv0 = GCNConv(num_in_features, num_hidden_features)
-        self.conv1 = GCNConv(num_hidden_features, num_hidden_features)
-        self.conv2 = GCNConv(num_hidden_features, num_hidden_features)
-        self.conv3 = GCNConv(num_hidden_features, num_hidden_features)
-
-        self.linear1 = nn.Linear(num_hidden_features * 2, num_hidden_features)
-        # self.linear12 = nn.Linear(num_hidden_features * 2, num_hidden_features)
-        self.linear2 = nn.Linear(num_hidden_features, num_classes)
-
-    def forward(self, x, edge_index):
-        x = self.conv0(x, edge_index)
-        x = F.relu(x)
-
-        x = self.conv1(x, edge_index)
-        x = F.relu(x)
-
-        x = self.conv2(x, edge_index)
-        x = F.relu(x)
-
-        x = self.conv3(x, edge_index)
-        # x = F.relu(x)
-
-        x = torch.cat([x[edge_index[0]], x[edge_index[1]]], 1)
-
-        x = self.linear1(x)
-        x = F.relu(x)
-        x = self.linear2(x)
-        x = F.log_softmax(x, dim=-1)
-
-        return x
-
-class BA_Shapes_GCN_edge_multiclass(nn.Module):
-    def __init__(self, num_in_features, num_hidden_features, num_classes, name):
-        super(BA_Shapes_GCN_edge_multiclass, self).__init__()
-
-        self.name = name
-
-        self.conv0 = GCNConv(num_in_features, num_hidden_features)
-        self.conv1 = GCNConv(num_hidden_features, num_hidden_features)
-        self.conv2 = GCNConv(num_hidden_features, num_hidden_features)
-        self.conv3 = GCNConv(num_hidden_features, num_hidden_features)
-
-        self.linear1 = nn.Linear(num_hidden_features * 2, num_hidden_features)
-        # self.linear12 = nn.Linear(num_hidden_features * 2, num_hidden_features)
-        self.linear2 = nn.Linear(num_hidden_features, num_classes)
-
-    def forward(self, x, edge_index, pos_edges_train, neg_edges_train, pos_edges_test, neg_edges_test, mode="linear"):
-        x = self.conv0(x, edge_index)
-        x = F.relu(x)
-
-        x = self.conv1(x, edge_index)
-        x = F.relu(x)
-
-        x = self.conv2(x, edge_index)
-        x = F.relu(x)
-
-        x = self.conv3(x, edge_index)
-        # x = F.relu(x)
-
-        x1 = torch.cat([x[pos_edges_train[0]], x[pos_edges_train[1]]], 1)
-        x2 = torch.cat([x[neg_edges_train[0]], x[neg_edges_train[1]]], 1)
-        x3 = torch.cat([x[pos_edges_test[0]], x[pos_edges_test[1]]], 1) #
-        x4 = torch.cat([x[neg_edges_test[0]], x[neg_edges_test[1]]], 1) #
-        x_train = torch.cat([x1, x2], 0)
-        n_train = x_train.shape[0]
-        x_test = torch.cat([x3, x4], 0) #
-        n_test = x_test.shape[0]
-        x = torch.cat([x_train, x_test], 0)
-        x = self.linear1(x)
-        x = F.relu(x)
-        x = self.linear2(x)
-
-        x = F.log_softmax(x, dim=-1)
-        return x[:n_train], x[n_train:]
-
-class BA_Community_GCN(nn.Module):
-    def __init__(self, num_in_features, num_hidden_features, num_classes):
-        super(BA_Community_GCN, self).__init__()
-
-        self.name = "BA-Community"
-
-        self.conv0 = DenseGCNConv(num_in_features, num_hidden_features)
-        self.conv1 = DenseGCNConv(num_hidden_features, num_hidden_features)
-        self.conv2 = DenseGCNConv(num_hidden_features, num_hidden_features)
-        self.conv3 = DenseGCNConv(num_hidden_features, num_hidden_features)
-        self.conv4 = DenseGCNConv(num_hidden_features, num_hidden_features)
-        self.conv5 = DenseGCNConv(num_hidden_features, num_hidden_features)
-
-        # linear layers
-        self.linear = nn.Linear(num_hidden_features, num_classes)
-
-    def forward(self, x, edge_index):
-        x = self.conv0(x, edge_index)
-        x = F.relu(x)
-
-        x = self.conv1(x, edge_index)
-        x = F.relu(x)
-
-        x = self.conv2(x, edge_index)
-        x = F.relu(x)
-
-        x = self.conv3(x, edge_index)
-        x = F.relu(x)
-
-        x = self.conv4(x, edge_index)
-        x = F.relu(x)
-
-        x = self.conv5(x, edge_index)
-        x = F.relu(x)
-
-        x = self.linear(x)
-
-        return F.log_softmax(x, dim=-1).squeeze()
-
+        return out, x_rel, out_proto
 
 class Tree_Cycle_GCN(nn.Module):
     def __init__(self, num_in_features, num_hidden_features, num_classes, name):
@@ -515,123 +372,31 @@ def test(model, node_data_x, node_data_y, edge_list, mask):
     model.eval()
 
     correct = 0
-    pred = model(node_data_x, edge_list).max(dim=1)[1]
+    pred, _, _ = model(node_data_x, edge_list)
+    pred = pred.max(dim=1)[1]
 
     correct += pred[mask].eq(node_data_y[mask]).sum().item()
     return correct / (len(node_data_y[mask]))
 
-def test_edge(model, node_data_x, edge_list, edge_pos_train, edge_neg_train, edge_pos_test, edge_neg_test, train=True):
-    # enter evaluation mode
-    model.eval()
 
-    out_train, out_test = model(node_data_x, edge_list, edge_pos_train, edge_neg_train, edge_pos_test, edge_neg_test)
-    # out_test = torch.cat([pos_score_test, neg_score_test])
-    if train:
-        labels = torch.cat([torch.ones(int(out_train.shape[0]/2)), torch.zeros(int(out_train.shape[0]/2))])
-        accuracy = acc(out_train, labels)
+
+def additional_loss(x, labels, prot_labels, mode='equal'):
+    prot_labels = prot_labels.repeat(x.shape[0], 1)
+    labels = labels.unsqueeze(1)
+    if mode == 'equal':
+        labels_mask = prot_labels == labels
+        return (x[labels_mask]*(-1)).mean()
     else:
-        labels = torch.cat([torch.ones(int(out_test.shape[0]/2)), torch.zeros(int(out_test.shape[0]/2))])
-        accuracy = acc(out_test, labels)
-    return accuracy
+        labels_mask = prot_labels != labels
+        return x[labels_mask].mean()
 
-def test_edge_multiclass(model, node_data_x, labels, edge_list, edge_pos_train, edge_neg_train, edge_pos_test, edge_neg_test, num_classes, mode='linear', train=True):
-    # enter evaluation mode
-    model.eval()
 
-    out_train, out_test = model(node_data_x, edge_list, edge_pos_train, edge_neg_train, edge_pos_test, edge_neg_test)
-    # out_test = torch.cat([pos_score_test, neg_score_test])
-    if train:
-        accuracy = multi_acc(out_train, labels, num_classes)
-    else:
-        accuracy = multi_acc(out_test, labels, num_classes)
-    return accuracy
-
-# def train(model, data, epochs, lr, path):
-#     # register hooks to track activation
-#     model = register_hooks(model)
-#     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-#
-#     # list of accuracies
-#     train_accuracies, test_accuracies, train_losses, test_losses = list(), list(), list(), list()
-#
-#     # get data
-#     x = data["x"]
-#     edges = data["edges"]
-#     y = data["y"]
-#     train_mask = data["train_mask"]
-#     test_mask = data["test_mask"]
-#
-#     # iterate for number of epochs
-#     for epoch in range(epochs):
-#             # set mode to training
-#             model.train()
-#             optimizer.zero_grad()
-#
-#             # input data
-#             out = model(x, edges)
-#
-#             # calculate loss
-#             loss = F.nll_loss(out[train_mask], y[train_mask])
-#
-#             loss.backward()
-#             optimizer.step()
-#
-#             with torch.no_grad():
-#                 test_loss = F.nll_loss(out[test_mask], y[test_mask])
-#
-#                 # get accuracy
-#                 train_acc = test(model, x, y, edges, train_mask)
-#                 test_acc = test(model, x, y, edges, test_mask)
-#
-#             ## add to list and print
-#             train_accuracies.append(train_acc)
-#             test_accuracies.append(test_acc)
-#             train_losses.append(loss.item())
-#             test_losses.append(test_loss.item())
-#
-#             print('Epoch: {:03d}, Loss: {:.5f}, Train Acc: {:.5f}, Test Acc: {:.5f}'.
-#                   format(epoch, loss.item(), train_acc, test_acc), end = "\r")
-#
-#             if train_acc >= 0.95 and test_acc >= 0.95:
-#                 break
-#
-#     # plut accuracy graph
-#     plt.plot(train_accuracies, label="Train Accuracy")
-#     plt.plot(test_accuracies, label="Testing Accuracy")
-#     plt.title(f"Accuracy of {model.name} Model during Training")
-#     plt.xlabel("Epoch")
-#     plt.ylabel("Accuracy")
-#     plt.legend(loc='upper right')
-#     plt.savefig(os.path.join(path, f"model_accuracy_plot.png"))
-#     plt.show()
-#
-#     plt.plot(train_losses, label="Train Loss")
-#     plt.plot(test_losses, label="Testing Loss")
-#     plt.title(f"Loss of {model.name} Model during Training")
-#     plt.xlabel("Epoch")
-#     plt.ylabel("Loss")
-#     plt.legend(loc='upper right')
-#     plt.savefig(os.path.join(path, f"model_loss_plot.png"))
-#     plt.show()
-#
-#     # save model
-#     torch.save(model.state_dict(), os.path.join(path, "model.pkl"))
-#
-#     with open(os.path.join(path, "activations.txt"), 'wb') as file:
-#         pickle.dump(activation_list, file)
-
-def acc(pred, labels):
-    acc = BinaryAccuracy()
-    return acc(pred, labels)
-
-def multi_acc(pred, labels, num_classes):
-    acc = MulticlassAccuracy(num_classes=num_classes, average='micro')
-    return acc(pred, labels)
-
-def train(model, data, epochs, lr, path, mode='node'):
+def train(model, data, epochs, lr, lr_decay, early_stopping, path, proto_loss=False):
     # register hooks to track activation
     model = register_hooks(model)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1,
+                                                  end_factor=lr_decay, total_iters=epochs)
 
     # list of accuracies
     train_accuracies, test_accuracies, train_losses, test_losses = list(), list(), list(), list()
@@ -639,139 +404,64 @@ def train(model, data, epochs, lr, path, mode='node'):
     # get data
     x = data["x"]
     edges = data["edges"]
-    if mode == 'node' or mode == 'edge_classification':
-        y = data["y"]
-        train_mask = data["train_mask"]
-        test_mask = data["test_mask"]
+    y = data["y"]
+    train_mask = data["train_mask"]
+    test_mask = data["test_mask"]
+    min_loss = 500000
+    counter = 0
+    # iterate for number of epochs
+    for epoch in range(epochs):
+        # set mode to training
+        model.train()
+        optimizer.zero_grad()
+        if counter > early_stopping:
+            break
+        # input data
+        out, x_rel, _ = model(x, edges)
 
-        # iterate for number of epochs
-        for epoch in range(epochs):
-                # set mode to training
-                model.train()
-                optimizer.zero_grad()
+        n_proto = len(model.prot)
+        wandb.log({'Epoch': epoch, 'Number of prototype': n_proto})
 
-                # input data
-                out = model(x, edges)
+        equal_loss = additional_loss(x_rel[train_mask], y[train_mask], y[model.prot])
+        divergence_loss = additional_loss(x_rel[train_mask], y[train_mask], y[model.prot], 'diverse')
+        loss = F.nll_loss(out[train_mask], y[train_mask])
+        wandb.log({'Train loss': loss.item(), 'Train_equal_loss': equal_loss,
+                   'Train_diverse_loss': divergence_loss})
 
-                # calculate loss
-                loss = F.nll_loss(out[train_mask], y[train_mask])
-                loss.backward()
-                optimizer.step()
+        # calculate loss
+        if proto_loss:
+            final_loss = loss + equal_loss + divergence_loss
+        else:
+            final_loss = loss
 
-                with torch.no_grad():
-                    test_loss = F.nll_loss(out[test_mask], y[test_mask])
+        final_loss.backward()
+        optimizer.step()
+        scheduler.step()
 
-                    # get accuracy
-                    train_acc = test(model, x, y, edges, train_mask)
-                    test_acc = test(model, x, y, edges, test_mask)
+        with torch.no_grad():
+            test_loss = F.nll_loss(out[test_mask], y[test_mask])
+            wandb.log({'Test loss': loss.item()})
+            if min_loss > test_loss:
+                min_loss = test_loss
+                counter = 0
+            else:
+                counter += 1
 
-                ## add to list and print
-                train_accuracies.append(train_acc)
-                test_accuracies.append(test_acc)
-                train_losses.append(loss.item())
-                test_losses.append(test_loss.item())
+            # get accuracy
+            train_acc = test(model, x, y, edges, train_mask)
+            test_acc = test(model, x, y, edges, test_mask)
+            wandb.log({'Train accuracy': train_acc,
+                       'Test accuracy': test_acc})
 
-                print('Epoch: {:03d}, Loss: {:.5f}, Train Acc: {:.5f}, Test Acc: {:.5f}'.
-                      format(epoch, loss.item(), train_acc, test_acc), end = "\r")
+        ## add to list and print
+        train_accuracies.append(train_acc)
+        test_accuracies.append(test_acc)
+        train_losses.append(loss.item())
+        test_losses.append(test_loss.item())
 
-                # if train_acc >= 0.95 and test_acc >= 0.95:
-                #     break
-    elif mode == 'edge':
-        train_pos = data['train_pos_edge_index']
-        train_neg = data['train_neg_edge_index']
-        test_pos = data['test_pos_edge_index']
-        test_neg = data['test_neg_edge_index']
+        # print('Epoch: {:03d}, Loss: {:.5f}, Train Acc: {:.5f}, Test Acc: {:.5f}'.
+        #       format(epoch, loss.item(), train_acc, test_acc), end="\r")
 
-        # iterate for number of epochs
-        for epoch in range(epochs):
-            # set mode to training
-            model.train()
-            optimizer.zero_grad()
-
-            # input data
-            out, _ = model(x, edges, train_pos, train_neg, test_pos, test_neg)
-
-            # out = torch.cat([pos_score, neg_score])
-            labels = torch.cat([torch.ones(int(out.shape[0]/2)), torch.zeros(int(out.shape[0]/2))])
-
-            # calculate loss
-            loss = F.binary_cross_entropy_with_logits(out, labels)
-            loss.backward()
-            optimizer.step()
-
-            with torch.no_grad():
-
-                edges_test = torch.cat([edges, train_pos], 1)
-                _, out_test = model(x, edges_test, train_pos, train_neg, test_pos, test_neg)
-
-                # out_test = torch.cat([pos_score_test, neg_score_test])
-                labels_test = torch.cat([torch.ones(int(out_test.shape[0]/2)), torch.zeros(int(out_test.shape[0]/2))])
-                test_loss = F.binary_cross_entropy_with_logits(out_test, labels_test)
-
-                # get accuracy
-                train_acc = float(acc(out, labels))
-                test_acc = float(acc(out_test, labels_test))
-            ## add to list and print
-            train_accuracies.append(train_acc)
-            test_accuracies.append(test_acc)
-            train_losses.append(loss.item())
-            test_losses.append(test_loss.item())
-
-            print('Epoch: {:03d}, Loss: {:.5f}, Train Acc: {:.5f}, Test Acc: {:.5f}'.
-                  format(epoch, loss.item(), train_acc, test_acc), end="\r")
-
-            if train_acc >= 0.95 and test_acc >= 0.95:
-                break
-    elif mode == 'edge_multiclass':
-        train_pos = data['train_pos_edge_index']
-        train_neg = data['train_neg_edge_index']
-        test_pos = data['test_pos_edge_index']
-        test_neg = data['test_neg_edge_index']
-        train_labels = data['y_train']
-        num_classes = len(set(train_labels.tolist()))
-        test_labels = data['y_test']
-
-        # iterate for number of epochs
-        for epoch in range(epochs):
-            # set mode to training
-            model.train()
-            optimizer.zero_grad()
-
-            # input data
-            out, _ = model(x, edges, train_pos, train_neg, test_pos, test_neg, mode='linear')
-
-            # out = torch.cat([pos_score, neg_score])
-
-            # calculate loss
-            loss = F.nll_loss(out, train_labels)
-            loss.backward()
-            optimizer.step()
-
-            with torch.no_grad():
-
-                edges_test = torch.cat([edges, train_pos], 1)
-                _, out_test = model(x, edges_test, train_pos, train_neg, test_pos, test_neg, mode='linear')
-
-                # out_test = torch.cat([pos_score_test, neg_score_test])
-                test_loss = F.nll_loss(out_test, test_labels)
-
-                # get accuracy
-                train_acc = float(multi_acc(out, train_labels, num_classes))
-                test_acc = float(multi_acc(out_test, test_labels, num_classes))
-            ## add to list and print
-            train_accuracies.append(train_acc)
-            test_accuracies.append(test_acc)
-            train_losses.append(loss.item())
-            test_losses.append(test_loss.item())
-
-            print('Epoch: {:03d}, Loss: {:.5f}, Train Acc: {:.5f}, Test Acc: {:.5f}'.
-                  format(epoch, loss.item(), train_acc, test_acc), end="\r")
-
-            if train_acc >= 0.95 and test_acc >= 0.95:
-                break
-
-        metric = MulticlassConfusionMatrix(num_classes=num_classes)
-        print(metric(out_test, test_labels))
     # plut accuracy graph
     plt.plot(train_accuracies, label="Train Accuracy")
     plt.plot(test_accuracies, label="Testing Accuracy")
@@ -780,7 +470,6 @@ def train(model, data, epochs, lr, path, mode='node'):
     plt.ylabel("Accuracy")
     plt.legend(loc='upper right')
     plt.savefig(os.path.join(path, f"model_accuracy_plot.png"))
-    plt.show()
 
     plt.plot(train_losses, label="Train Loss")
     plt.plot(test_losses, label="Testing Loss")
@@ -789,7 +478,6 @@ def train(model, data, epochs, lr, path, mode='node'):
     plt.ylabel("Loss")
     plt.legend(loc='upper right')
     plt.savefig(os.path.join(path, f"model_loss_plot.png"))
-    plt.show()
 
     # save model
     torch.save(model.state_dict(), os.path.join(path, "model.pkl"))
