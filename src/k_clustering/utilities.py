@@ -238,23 +238,6 @@ def anchor_index_for_classes(dataset, labels, k, n_classes, train_mask):
 
 def prepare_output_paths(dataset_name, k, seed):
     path = f"output/{dataset_name}_{k}_seed{seed}/"
-    path_tsne = os.path.join(path, "TSNE")
-    path_pca = os.path.join(path, "PCA")
-    path_umap = os.path.join(path, "UMAP")
-    path_kmeans = os.path.join(path, f"{k}_KMeans")
-    path_hc = os.path.join(path, f"HC")
-    path_ward = os.path.join(path, f"WARD")
-    path_dbscan = os.path.join(path, f"DBSCAN")
-    path_edges = os.path.join(path, f"edges")
     os.makedirs(path, exist_ok=True)
-    os.makedirs(path_tsne, exist_ok=True)
-    os.makedirs(path_pca, exist_ok=True)
-    os.makedirs(path_umap, exist_ok=True)
-    os.makedirs(path_kmeans, exist_ok=True)
-    os.makedirs(path_hc, exist_ok=True)
-    os.makedirs(path_ward, exist_ok=True)
-    os.makedirs(path_dbscan, exist_ok=True)
-    os.makedirs(path_edges, exist_ok=True)
 
-    return {"base": path, "TSNE": path_tsne, "PCA": path_pca, "UMAP": path_umap, "KMeans": path_kmeans, "HC": path_hc,
-            "Ward": path_ward, "DBSCAN": path_dbscan, "edges": path_edges}
+    return {"base": path}
