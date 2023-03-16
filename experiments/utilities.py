@@ -28,24 +28,24 @@ from models import *
 
 def load_syn_data(dataset_str):
     if dataset_str == "BA_Shapes":
-        G = nx.readwrite.read_gpickle("../../data/BA_Houses/graph_ba_300_80.gpickel")
-        role_ids = np.load("../../data/BA_Houses/role_ids_ba_300_80.npy")
+        G = nx.readwrite.read_gpickle("../data/BA_Houses/graph_ba_300_80.gpickel")
+        role_ids = np.load("../data/BA_Houses/role_ids_ba_300_80.npy")
 
     elif dataset_str == "BA_Grid":
-        G = nx.readwrite.read_gpickle("../../data/BA_Grid/graph_ba_300_80.gpickel")
-        role_ids = np.load("../../data/BA_Grid/role_ids_ba_300_80.npy")
+        G = nx.readwrite.read_gpickle("../data/BA_Grid/graph_ba_300_80.gpickel")
+        role_ids = np.load("../data/BA_Grid/role_ids_ba_300_80.npy")
 
     elif dataset_str == "BA_Community":
-        G = nx.readwrite.read_gpickle("../../data/BA_Community/graph_ba_350_100_2comm.gpickel")
-        role_ids = np.load("../../data/BA_Community/role_ids_ba_350_100_2comm.npy")
+        G = nx.readwrite.read_gpickle("../data/BA_Community/graph_ba_350_100_2comm.gpickel")
+        role_ids = np.load("../data/BA_Community/role_ids_ba_350_100_2comm.npy")
 
     elif dataset_str == "Tree_Cycle":
-        G = nx.readwrite.read_gpickle("../../data/Tree_Cycle/graph_tree_8_60.gpickel")
-        role_ids = np.load("../../data/Tree_Cycle/role_ids_tree_8_60.npy")
+        G = nx.readwrite.read_gpickle("../data/Tree_Cycle/graph_tree_8_60.gpickel")
+        role_ids = np.load("../data/Tree_Cycle/role_ids_tree_8_60.npy")
 
     elif dataset_str == "Tree_Grid":
-        G = nx.readwrite.read_gpickle("../../data/Tree_Grid/graph_tree_8_80.gpickel")
-        role_ids = np.load("../../data/Tree_Grid/role_ids_tree_8_80.npy")
+        G = nx.readwrite.read_gpickle("../data/Tree_Grid/graph_tree_8_80.gpickel")
+        role_ids = np.load("../data/Tree_Grid/role_ids_tree_8_80.npy")
 
     elif dataset_str == 'Twitch':
         G = Twitch('../data/Twitch', 'EN')[0]
@@ -141,18 +141,6 @@ def set_rc_params():
     plt.rc('legend', fontsize=small)
     plt.rc('figure', titlesize=large, facecolor='white')
     plt.rc('legend', loc='upper left')
-
-
-def plot_activation_space(data, labels, activation_type, layer_num, path, note="", naming_help=""):
-    rows = len(data)
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.set_title(f"{activation_type} Activations of Layer {layer_num} {note}")
-
-    scatter = ax.scatter(data[:,0], data[:,1], c=labels, cmap='rainbow')
-    ax.legend(handles=scatter.legend_elements()[0], labels=list(np.unique(labels)), bbox_to_anchor=(1.05, 1))
-
-    plt.savefig(os.path.join(path, f"{layer_num}_layer{naming_help}.png"))
-    plt.show()
 
 def get_subgraph(idx, y, edges, num_expansions):
     graphs = []
