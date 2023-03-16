@@ -11,7 +11,7 @@ The report of this project is the [R255_Topic5_gd489.pdf](R255_Topic5_gd489.pdf)
 [experiments.py](./experiments/experiments.py) is the main file.
 It can be run using W&B sweeps. 
 
-After setting up W&B account on your PC, you can build a config file like [sequential_sweep.yaml](.experiments/config/sequential_sweep.yaml).
+After setting up W&B account on your PC, you can build a config file like [sequential_sweep.yaml](./experiments/config/sequential_sweep.yaml).
 Then, you set up the sweep:
 
 ```
