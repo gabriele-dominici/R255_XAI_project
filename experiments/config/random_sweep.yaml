@@ -1,0 +1,32 @@
+program: experiments.py
+method: grid
+parameters:
+  mode:
+    values:
+    - 'random'
+  dataset:
+    values:
+    - 'BA_Shapes'
+    - 'BA_Grid'
+    - 'BA_Community'
+#    - 'Tree_Cycle'
+    - 'Cora'
+  k:
+    values:
+    - 2
+    - 4
+    - 8
+    - 16
+  seed:
+    values:
+#    - 0
+#    - 8
+#    - 13
+#    - 24
+    - 42
+  loss_factor:
+    values:
+    - 0
+#    - 0.2
+#    - 0.5
+#    - 1

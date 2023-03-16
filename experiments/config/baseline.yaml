@@ -1,0 +1,44 @@
+datasets:
+  desc: Datasets used
+  values: ['BA_Shapes', 'BA_Grid', 'BA_Community', 'Tree_Cycle', 'Cora']
+epochs:
+  desc: Number of epochs to train over
+  values: {'BA_Shapes': 8000,
+          'BA_Grid': 4000,
+          'BA_Community': 12000,
+          'Tree_Cycle': 12000,
+          'Cora': 3000}
+num_layers:
+  desc: Number of GNN layers
+  values: {'BA_Shapes': 4,
+          'BA_Grid': 4,
+          'BA_Community': 6,
+          'Tree_Cycle': 3,
+          'Cora': 2}
+hidden_dim:
+  desc: Hidden dimension of GNN models
+  values: {'BA_Shapes': 20,
+          'BA_Grid': 20,
+          'BA_Community': 30,
+          'Tree_Cycle': 50,
+          'Cora': 20}
+num_classes:
+  desc: Number of classes of the datasets
+  values: {'BA_Shapes': 4,
+          'BA_Grid': 2,
+          'BA_Community': 8,
+          'Tree_Cycle': 2,
+          'Cora': 7}
+lr:
+  desc: Learning rate to use
+  values: {'BA_Shapes': 0.001,
+          'BA_Grid': 0.001,
+          'BA_Community': 0.001,
+          'Tree_Cycle': 0.001,
+          'Cora': 0.001}
+lr_decay:
+  desc: End factor of linear lr decay
+  values: 0.1
+early_stopping:
+  desc: After how many epochs stop the training if the loss does not decrease
+  values: 400
